@@ -255,6 +255,79 @@ describe("StateCallbacks", () => {
         assert.strictEqual(4, onPropertyListen);
     });
 
+    it("should support onChange on nested schema when instance not yet tracked", () => {
+        class Player extends Schema {
+            @type("number") x: number;
+            @type("number") y: number;
+        }
+
+        class State extends Schema {
+            @type(Player) player: Player;
+        }
+
+        const state = new State();
+        const decodedState = createInstanceFromReflection(state);
+        const $ = getCallbacks(decodedState);
+
+        let onChangeCount = 0;
+
+        // Register onChange on nested .player BEFORE data is available
+        // This should not throw "Can't addCallback on 'REPLACE' (refId is undefined)"
+        $(decodedState).player.onChange(() => {
+            onChangeCount++;
+        });
+
+        // Now assign and encode
+        state.player = new Player().assign({ x: 10, y: 20 });
+        decodedState.decode(state.encode());
+
+        // onChange triggers when player is first set (x and y are set)
+        assert.strictEqual(onChangeCount, 1);
+
+        // Trigger another change
+        state.player.x = 30;
+        decodedState.decode(state.encode());
+
+        // onChange should have triggered again
+        assert.strictEqual(onChangeCount, 2);
+    });
+
+    it("should support bindTo on nested schema when instance not yet tracked", () => {
+        class Player extends Schema {
+            @type("number") x: number;
+            @type("number") y: number;
+        }
+
+        class State extends Schema {
+            @type(Player) player: Player;
+        }
+
+        const state = new State();
+        state.player = new Player().assign({ x: 10, y: 20 });
+
+        const decodedState = createInstanceFromReflection(state);
+        decodedState.decode(state.encode());
+
+        const $ = getCallbacks(decodedState);
+
+        const bound: any = {};
+
+        // Register bindTo AFTER player instance exists and is tracked
+        $(decodedState).player.bindTo(bound);
+
+        // Initial values aren't synced (bindTo only fires on REPLACE, not initial)
+        assert.strictEqual(bound.x, undefined);
+        assert.strictEqual(bound.y, undefined);
+
+        // Trigger changes - now bindTo should sync
+        state.player.x = 30;
+        state.player.y = 40;
+        decodedState.decode(state.encode());
+
+        assert.strictEqual(bound.x, 30);
+        assert.strictEqual(bound.y, 40);
+    });
+
     describe("ArraySchema", () => {
         it("consecutive shift + unshift should trigger onAdd at 0 index", () => {
             class Card extends Schema {

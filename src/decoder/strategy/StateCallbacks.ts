@@ -271,11 +271,25 @@ export function getDecoderStateCallbacks<T extends Schema>(decoder: Decoder<T>):
                 },
 
                 onChange: function onChange(callback: () => void) {
-                    return $root.addCallback(
-                        $root.refIds.get(context.instance),
-                        OPERATION.REPLACE,
-                        callback
-                    );
+                    const refId = $root.refIds.get(context.instance);
+                    if (refId !== undefined) {
+                        return $root.addCallback(refId, OPERATION.REPLACE, callback);
+
+                    } else if (context.onInstanceAvailable) {
+                        // instance not tracked yet, wait for it
+                        let detachCallback = () => {};
+
+                        context.onInstanceAvailable((ref: Ref) => {
+                            detachCallback = $root.addCallback($root.refIds.get(ref), OPERATION.REPLACE, callback);
+                        });
+
+                        return () => detachCallback();
+
+                    } else {
+                        // instance exists but no refId and no onInstanceAvailable
+                        // this shouldn't happen in normal usage
+                        throw new Error(`Can't register onChange: instance exists but has no refId`);
+                    }
                 },
 
                 //
@@ -286,14 +300,27 @@ export function getDecoderStateCallbacks<T extends Schema>(decoder: Decoder<T>):
                     if (!properties) {
                         properties = Object.keys(metadata).map((index) => metadata[index as any as number].name);
                     }
-                    return $root.addCallback(
-                        $root.refIds.get(context.instance),
-                        OPERATION.REPLACE,
-                        () => {
-                            properties.forEach((prop) =>
-                                targetObject[prop] = context.instance[prop])
-                        }
-                    );
+                    const bindCallback = () => {
+                        properties.forEach((prop) => {
+                            targetObject[prop] = context.instance[prop];
+                        });
+                    };
+                    const refId = $root.refIds.get(context.instance);
+                    if (refId !== undefined) {
+                        return $root.addCallback(refId, OPERATION.REPLACE, bindCallback);
+
+                    } else if (context.onInstanceAvailable) {
+                        let detachCallback = () => {};
+
+                        context.onInstanceAvailable((ref: Ref) => {
+                            detachCallback = $root.addCallback($root.refIds.get(ref), OPERATION.REPLACE, bindCallback);
+                        });
+
+                        return () => detachCallback();
+
+                    } else {
+                        throw new Error(`Can't register bindTo: instance exists but has no refId`);
+                    }
                 }
             }, {
                 get(target, prop: string) {
